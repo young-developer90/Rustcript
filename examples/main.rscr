@@ -1,0 +1,9 @@
+let mut x: u16 = 10
+if x > 5:
+    unsafe {
+        x = x + 1
+    }
+elif x == 5:
+    x = x * 2
+else:
+    x = 0
