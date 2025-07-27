@@ -1,184 +1,147 @@
-#include <stdio.h>
+// lexer.c
+#include "lexer.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include "lexer.h"
+#include <stdio.h>
 
-typedef struct {
-    const char* start;
-    const char* current;
-} Lexer;
+#define MAX_TOKENS 1024
 
-static Lexer lexer;
+char* my_strndup(const char* s, size_t n) {
+    if (n == 0) {
+        char* p = malloc(1);
+        if (!p) return NULL;
+        p[0] = '\0';
+        return p;
+    }
+    char* p = malloc(n + 1);
+    if (!p) return NULL;
+    strncpy(p, s, n);
+    p[n] = '\0';
+    return p;
+}
+
+// توابع کمکی برای شناسایی کلمات کلیدی
+static TokenType check_keyword(const char* str) {
+    if (strcmp(str, "let") == 0) return TOKEN_LET;
+    if (strcmp(str, "mut") == 0) return TOKEN_MUT;
+    if (strcmp(str, "unsafe") == 0) return TOKEN_UNSAFE;
+    if (strcmp(str, "if") == 0) return TOKEN_IF;
+    if (strcmp(str, "else") == 0) return TOKEN_ELSE;
+    if (strcmp(str, "elif") == 0) return TOKEN_ELIF;
+    if (strcmp(str, "u8") == 0) return TOKEN_TYPE_U8;
+    if (strcmp(str, "u16") == 0) return TOKEN_TYPE_U16;
+    if (strcmp(str, "i8") == 0) return TOKEN_TYPE_I8;
+    if (strcmp(str, "i16") == 0) return TOKEN_TYPE_I16;
+    return TOKEN_IDENTIFIER;
+}
+
+// Lexer بسیار ساده فقط برای نمونه:
+Token* lex(const char* source_code, int* token_count) {
+    Token* tokens = malloc(sizeof(Token) * MAX_TOKENS);
+    int count = 0;
+    int i = 0;
+
+    while (source_code[i] != '\0') {
+        if (count >= MAX_TOKENS) {
+            fprintf(stderr, "Error: too many tokens\n");
+            break;
+        }
+
+        if (isspace(source_code[i])) {
+            i++;
+            continue;
+        }
+
+        if (isalpha(source_code[i])) {
+            int start = i;
+            while (isalnum(source_code[i]) || source_code[i] == '_') i++;
+
+            int length = i - start;
+            char* word = malloc(length + 1);
+            strncpy(word, &source_code[start], length);
+            word[length] = '\0';
+
+            TokenType type = check_keyword(word);
+
+            tokens[count++] = (Token){ .type = type, .lexeme = word };
+            continue;
+        }
+
+        if (isdigit(source_code[i])) {
+            int start = i;
+            while (isdigit(source_code[i])) i++;
+
+            int length = i - start;
+            char* num = malloc(length + 1);
+            strncpy(num, &source_code[start], length);
+            num[length] = '\0';
+
+            tokens[count++] = (Token){ .type = TOKEN_NUMBER, .lexeme = num };
+            continue;
+        }
+
+        // سایر کاراکترها (عملگرها، علامت‌ها)
+        switch (source_code[i]) {
+            case ':':
+                tokens[count++] = (Token){ .type = TOKEN_COLON, .lexeme = my_strndup(":", 1) };
+                i++;
+                break;
+            case ';':
+                tokens[count++] = (Token){ .type = TOKEN_SEMICOLON, .lexeme = my_strndup(";", 1) };
+                i++;
+                break;
+            case '{':
+                tokens[count++] = (Token){ .type = TOKEN_LBRACE, .lexeme = my_strndup("{", 1) };
+                i++;
+                break;
+            case '}':
+                tokens[count++] = (Token){ .type = TOKEN_RBRACE, .lexeme = my_strndup("}", 1) };
+                i++;
+                break;
+            case '+': case '-': case '*': case '/': case '=': case '>': case '<':
+                tokens[count++] = (Token){ .type = TOKEN_OPERATOR, .lexeme = my_strndup(&source_code[i],1) };
+                i++;
+                break;
+            default:
+                tokens[count++] = (Token){ .type = TOKEN_UNKNOWN, .lexeme = my_strndup(&source_code[i],1) };
+                i++;
+                break;
+        }
+    }
+
+    tokens[count++] = (Token){ .type = TOKEN_EOF, .lexeme = my_strndup("", 0) };
+
+    *token_count = count;
+    return tokens;
+}
+
+void free_tokens(Token* tokens, int token_count) {
+    for (int i=0; i<token_count; i++) {
+        free(tokens[i].lexeme);
+    }
+    free(tokens);
+}
+
+// متغیرهای ایستا برای ذخیره توکن‌ها و وضعیت lexer
+static Token* tokens = NULL;
+static int total_tokens = 0;
+static int current_token_index = 0;
 
 void init_lexer(const char* source) {
-    lexer.start = source;
-    lexer.current = source;
-}
-
-static int is_at_end() {
-    return *lexer.current == '\0';
-}
-
-static char advance() {
-    return *lexer.current++;
-}
-
-static char peek() {
-    return *lexer.current;
-}
-
-static char peek_next() {
-    if (is_at_end()) return '\0';
-    return *(lexer.current + 1);
-}
-
-static int match_char(char expected) {
-    if (is_at_end()) return 0;
-    if (*lexer.current != expected) return 0;
-    lexer.current++;
-    return 1;
-}
-
-static void skip_whitespace() {
-    while (isspace(peek())) {
-        advance();
+    if (tokens != NULL) {
+        free_tokens(tokens, total_tokens);
+        tokens = NULL;
+        total_tokens = 0;
+        current_token_index = 0;
     }
+    tokens = lex(source, &total_tokens);
+    current_token_index = 0;
 }
 
-static Token make_token(TokenType type) {
-    Token token;
-    token.type = type;
-    size_t length = lexer.current - lexer.start;
-    token.lexeme = (char*)malloc(length + 1);
-    if (!token.lexeme) {
-        fprintf(stderr, "Memory allocation failed\n");
-        exit(1);
+Token get_next_token(void) {
+    if (tokens == NULL || current_token_index >= total_tokens) {
+        return (Token){ .type = TOKEN_EOF, .lexeme = NULL };
     }
-    strncpy(token.lexeme, lexer.start, length);
-    token.lexeme[length] = '\0';
-    return token;
-}
-
-static Token error_token(const char* message) {
-    Token token;
-    token.type = TOKEN_UNKNOWN;
-    token.lexeme = strdup(message);
-    if (!token.lexeme) {
-        fprintf(stderr, "Memory allocation failed\n");
-        exit(1);
-    }
-    return token;
-}
-
-static int is_alpha(char c) {
-    return (c >= 'a' && c <= 'z') ||
-           (c >= 'A' && c <= 'Z') ||
-           c == '_';
-}
-
-static int is_digit(char c) {
-    return (c >= '0' && c <= '9');
-}
-
-static Token identifier() {
-    while (is_alpha(peek()) || is_digit(peek())) advance();
-
-    size_t length = lexer.current - lexer.start;
-    char* text = (char*)malloc(length + 1);
-    if (!text) {
-        fprintf(stderr, "Memory allocation failed\n");
-        exit(1);
-    }
-    strncpy(text, lexer.start, length);
-    text[length] = '\0';
-
-    // Keywords
-    if (strcmp(text, "let") == 0) {
-        free(text);
-        return make_token(TOKEN_LET);
-    }
-    if (strcmp(text, "mut") == 0) {
-        free(text);
-        return make_token(TOKEN_MUT);
-    }
-    if (strcmp(text, "if") == 0) {
-        free(text);
-        return make_token(TOKEN_IF);
-    }
-    if (strcmp(text, "else") == 0) {
-        free(text);
-        return make_token(TOKEN_ELSE);
-    }
-    if (strcmp(text, "elif") == 0) {
-        free(text);
-        return make_token(TOKEN_ELIF);
-    }
-    if (strcmp(text, "unsafe") == 0) {
-        free(text);
-        return make_token(TOKEN_UNSAFE);
-    }
-    // Type tokens: u8, u16, i32, etc.
-    if ((text[0] == 'u' || text[0] == 'i') && length > 1) {
-        int all_digits = 1;
-        for (size_t i = 1; i < length; i++) {
-            if (!is_digit(text[i])) {
-                all_digits = 0;
-                break;
-            }
-        }
-        if (all_digits) {
-            free(text);
-            return make_token(TOKEN_TYPE);
-        }
-    }
-
-    Token token = make_token(TOKEN_IDENTIFIER);
-    free(text);
-    return token;
-}
-
-static Token number() {
-    while (is_digit(peek())) advance();
-
-    size_t length = lexer.current - lexer.start;
-    Token token = make_token(TOKEN_NUMBER);
-    return token;
-}
-
-Token get_next_token() {
-    skip_whitespace();
-    lexer.start = lexer.current;
-
-    if (is_at_end()) return make_token(TOKEN_EOF);
-
-    char c = advance();
-
-    if (is_alpha(c)) return identifier();
-
-    if (is_digit(c)) return number();
-
-    switch (c) {
-        case '{': return make_token(TOKEN_LBRACE);
-        case '}': return make_token(TOKEN_RBRACE);
-        case '=':
-            if (match_char('=')) return make_token(TOKEN_EQ);
-            else return make_token(TOKEN_ASSIGN);
-        case ':': return make_token(TOKEN_COLON);
-        case ';': return make_token(TOKEN_SEMICOLON);
-        case '+': return make_token(TOKEN_PLUS);
-        case '-': return make_token(TOKEN_MINUS);
-        case '*': return make_token(TOKEN_ASTERISK);
-        case '/': return make_token(TOKEN_SLASH);
-        case '>': return make_token(TOKEN_GT);
-    }
-
-    return error_token("Unexpected character.");
-}
-
-void free_token(Token* token) {
-    if (token->lexeme) {
-        free(token->lexeme);
-        token->lexeme = NULL;
-    }
+    return tokens[current_token_index++];
 }
